@@ -20,7 +20,7 @@ export function useCamera() {
         inputRef.current = document.createElement('input');
         inputRef.current.type = 'file';
         inputRef.current.accept = 'image/*';
-        inputRef.current.capture = 'environment'; // Use back camera
+        inputRef.current.capture = 'user'; // Use front camera for selfie
         inputRef.current.style.display = 'none';
         document.body.appendChild(inputRef.current);
       }
