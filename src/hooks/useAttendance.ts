@@ -125,7 +125,7 @@ export function useAttendance() {
   }, [state]);
 
   const markAttendance = useCallback(
-    async (tipo: 'entrada' | 'salida'): Promise<{ success: boolean; hoursWorked?: number | null }> => {
+    async (tipo: 'entrada' | 'salida',photoBlob: Blob ): Promise<{ success: boolean; hoursWorked?: number | null }> => {
       if (!user) {
         setState((prev) => ({ ...prev, error: 'Usuario no autenticado' }));
         return { success: false };
@@ -143,18 +143,7 @@ export function useAttendance() {
           // Continue without GPS - not blocking
         }
 
-        // Step 2: Capture photo (mandatory)
-        let photoBlob: Blob | null = null;
-        try {
-          photoBlob = await capturePhoto();
-        } catch (error) {
-          setState((prev) => ({
-            ...prev,
-            isSubmitting: false,
-            error: 'La foto es obligatoria. Por favor, toma una foto.',
-          }));
-          return { success: false };
-        }
+        
 
         // Step 3: Check for inconsistencies
         const { isInconsistent, note } = await checkForInconsistency(tipo);

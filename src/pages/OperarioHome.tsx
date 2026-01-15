@@ -11,7 +11,7 @@ import { HoursWorkedCard } from '@/components/HoursWorkedCard';
 import { ConfirmationModal } from '@/components/ConfirmationModal';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
-
+import { useCamera } from '@/hooks/useCamera';
 export default function OperarioHome() {
   const { profile, isSupervisor, signOut } = useAuth();
   const { isSubmitting, error, lastRecord, todayRecords, markAttendance, getTodayRecords, calculateHoursWorked } = useAttendance();
@@ -35,15 +35,28 @@ export default function OperarioHome() {
   const today = format(new Date(), "EEEE, d 'de' MMMM", { locale: es });
   const hoursWorked = calculateHoursWorked();
 
+ 
+
+  const { capturePhoto } = useCamera();
+
   const handleMarkAttendance = async (tipo: 'entrada' | 'salida') => {
-    const result = await markAttendance(tipo);
-    setModalState({
-      isOpen: true,
-      type: tipo,
-      success: result.success,
-      hoursWorked: result.hoursWorked,
-      error: result.success ? null : error,
-    });
+    try {
+      // 🔥 ABRIR CÁMARA INMEDIATAMENTE (user gesture válida)
+      const photoBlob = await capturePhoto();
+
+      // Luego ya puedes hacer todo lo demás
+      const result = await markAttendance(tipo, photoBlob);
+
+      setModalState({
+        isOpen: true,
+        type: tipo,
+        success: result.success,
+        hoursWorked: result.hoursWorked,
+        error: result.success ? null : error,
+      });
+    } catch (err) {
+      console.error('Captura cancelada o error:', err);
+    }
   };
 
   const closeModal = () => {
