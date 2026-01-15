@@ -15,26 +15,43 @@ export function useCamera() {
 
   const capturePhoto = useCallback((): Promise<Blob> => {
     return new Promise((resolve, reject) => {
-      // Create input element if not exists
-      if (!inputRef.current) {
-        inputRef.current = document.createElement('input');
-        inputRef.current.type = 'file';
-        inputRef.current.accept = 'image/*';
-        inputRef.current.capture = 'user'; // Use front camera for selfie
-        inputRef.current.style.display = 'none';
-        document.body.appendChild(inputRef.current);
+      // Remove existing input if any
+      if (inputRef.current) {
+        document.body.removeChild(inputRef.current);
+        inputRef.current = null;
       }
+
+      // Create fresh input element for each capture
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      
+      // For iOS Safari, we need to be more specific
+      // Setting capture="user" should open front camera directly
+      input.setAttribute('capture', 'user');
+      
+      input.style.position = 'fixed';
+      input.style.top = '-9999px';
+      input.style.left = '-9999px';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      inputRef.current = input;
 
       setState({ isCapturing: true, error: null });
 
-      const input = inputRef.current;
+      let isResolved = false;
 
       const cleanup = () => {
-        input.onchange = null;
-        input.value = '';
+        if (inputRef.current && inputRef.current.parentNode) {
+          document.body.removeChild(inputRef.current);
+        }
+        inputRef.current = null;
       };
 
       input.onchange = async (e) => {
+        if (isResolved) return;
+        isResolved = true;
+
         const target = e.target as HTMLInputElement;
         const file = target.files?.[0];
 
@@ -64,13 +81,27 @@ export function useCamera() {
         }
       };
 
-      // Trigger file picker/camera
-      input.click();
+      // Handle cancel - use a more reliable method for iOS
+      const handleVisibilityChange = () => {
+        // Small delay to allow file selection to complete
+        setTimeout(() => {
+          if (!isResolved && (!input.files || input.files.length === 0)) {
+            isResolved = true;
+            cleanup();
+            setState({ isCapturing: false, error: null });
+            reject(new Error('Captura cancelada'));
+          }
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+        }, 1000);
+      };
 
-      // Handle case where user cancels
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      // Also handle focus for desktop browsers
       const handleFocus = () => {
         setTimeout(() => {
-          if (input.value === '') {
+          if (!isResolved && (!input.files || input.files.length === 0)) {
+            isResolved = true;
             cleanup();
             setState({ isCapturing: false, error: null });
             reject(new Error('Captura cancelada'));
@@ -80,6 +111,9 @@ export function useCamera() {
       };
 
       window.addEventListener('focus', handleFocus);
+
+      // Trigger file picker/camera
+      input.click();
     });
   }, []);
 
