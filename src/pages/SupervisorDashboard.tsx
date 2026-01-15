@@ -42,17 +42,42 @@ export default function SupervisorDashboard() {
 
   const fetchRecords = async () => {
     setIsLoading(true);
+    
+    // Fetch attendance records
     let query = supabase
       .from('registros_asistencia')
-      .select('*, profiles(nombre)')
+      .select('*')
       .eq('fecha', dateFilter)
       .order('timestamp', { ascending: false });
 
     if (userFilter !== 'all') query = query.eq('user_id', userFilter);
     if (typeFilter !== 'all') query = query.eq('tipo_registro', typeFilter);
 
-    const { data } = await query;
-    setRecords((data as AttendanceRecord[]) || []);
+    const { data: recordsData } = await query;
+    
+    if (!recordsData || recordsData.length === 0) {
+      setRecords([]);
+      setIsLoading(false);
+      return;
+    }
+
+    // Get unique user IDs and fetch their profiles
+    const userIds = [...new Set(recordsData.map(r => r.user_id))];
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, nombre')
+      .in('id', userIds);
+
+    // Create a map of user_id to profile
+    const profilesMap = new Map(profilesData?.map(p => [p.id, p]) || []);
+
+    // Merge records with profiles
+    const mergedRecords: AttendanceRecord[] = recordsData.map(r => ({
+      ...r,
+      profiles: profilesMap.get(r.user_id) || null
+    }));
+
+    setRecords(mergedRecords);
     setIsLoading(false);
   };
 
