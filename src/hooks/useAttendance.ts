@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import { useGeolocation } from './useGeolocation';
-import { useCamera } from './useCamera';
 import { useOnlineStatus } from './useOnlineStatus';
 import { savePendingRecord, PendingRecord } from '@/lib/offline-db';
 
@@ -32,8 +31,8 @@ interface AttendanceState {
 export function useAttendance() {
   const { user } = useAuth();
   const { getCurrentPosition } = useGeolocation();
-  const { capturePhoto } = useCamera();
   const { isOnline } = useOnlineStatus();
+
   const [state, setState] = useState<AttendanceState>({
     isSubmitting: false,
     error: null,
@@ -82,19 +81,12 @@ export function useAttendance() {
       const records = todayRecords || [];
       const lastRecord = records[0];
 
-      // Check for inconsistencies
       if (tipo === 'entrada' && lastRecord?.tipo_registro === 'entrada') {
-        return {
-          isInconsistent: true,
-          note: 'Entrada marcada sin salida previa',
-        };
+        return { isInconsistent: true, note: 'Entrada marcada sin salida previa' };
       }
 
       if (tipo === 'salida' && (!lastRecord || lastRecord.tipo_registro === 'salida')) {
-        return {
-          isInconsistent: true,
-          note: 'Salida marcada sin entrada previa',
-        };
+        return { isInconsistent: true, note: 'Salida marcada sin entrada previa' };
       }
 
       return { isInconsistent: false, note: null };
@@ -106,14 +98,13 @@ export function useAttendance() {
     const { todayRecords } = state;
     if (todayRecords.length < 2) return null;
 
-    // Find first entrada and last salida
     const entradas = todayRecords.filter((r) => r.tipo_registro === 'entrada');
     const salidas = todayRecords.filter((r) => r.tipo_registro === 'salida');
 
     if (entradas.length === 0 || salidas.length === 0) return null;
 
-    const firstEntrada = entradas[entradas.length - 1]; // Oldest entrada
-    const lastSalida = salidas[0]; // Most recent salida
+    const firstEntrada = entradas[entradas.length - 1];
+    const lastSalida = salidas[0];
 
     const start = new Date(firstEntrada.timestamp);
     const end = new Date(lastSalida.timestamp);
@@ -121,11 +112,31 @@ export function useAttendance() {
     const diffMs = end.getTime() - start.getTime();
     const diffHours = diffMs / (1000 * 60 * 60);
 
-    return Math.round(diffHours * 10) / 10; // Round to 1 decimal
+    return Math.round(diffHours * 10) / 10;
   }, [state]);
 
+  // Subir una imagen a Storage y devolver publicUrl
+  const uploadPhoto = useCallback(async (path: string, blob: Blob): Promise<string | null> => {
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('attendance-photos')
+      .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+
+    if (uploadError) {
+      console.error('Error uploading photo:', uploadError);
+      return null;
+    }
+
+    const { data: urlData } = supabase.storage.from('attendance-photos').getPublicUrl(uploadData.path);
+    return urlData.publicUrl ?? null;
+  }, []);
+
+  /**
+   * ✅ Marca Entrada o Salida (solo 1 foto por registro)
+   * - Entrada: foto obligatoria
+   * - Salida: foto obligatoria
+   */
   const markAttendance = useCallback(
-    async (tipo: 'entrada' | 'salida',photoBlob: Blob ): Promise<{ success: boolean; hoursWorked?: number | null }> => {
+    async (tipo: 'entrada' | 'salida', photoBlob: Blob): Promise<{ success: boolean; hoursWorked?: number | null }> => {
       if (!user) {
         setState((prev) => ({ ...prev, error: 'Usuario no autenticado' }));
         return { success: false };
@@ -134,23 +145,21 @@ export function useAttendance() {
       setState((prev) => ({ ...prev, isSubmitting: true, error: null }));
 
       try {
-        // Step 1: Get GPS location
+        // 1) GPS
         let location: { latitude: number; longitude: number; accuracy: number } | null = null;
         try {
           location = await getCurrentPosition();
-        } catch (error) {
-          console.warn('Could not get GPS:', error);
-          // Continue without GPS - not blocking
+        } catch (err) {
+          console.warn('Could not get GPS:', err);
         }
 
-        
-
-        // Step 3: Check for inconsistencies
+        // 2) Inconsistencias
         const { isInconsistent, note } = await checkForInconsistency(tipo);
 
-        // Step 4: Create record
+        // 3) Record base
         const now = new Date();
         const recordId = crypto.randomUUID();
+
         const record: PendingRecord = {
           id: recordId,
           user_id: user.id,
@@ -160,7 +169,7 @@ export function useAttendance() {
           latitud: location?.latitude ?? null,
           longitud: location?.longitude ?? null,
           precision_gps: location?.accuracy ?? null,
-          fuera_zona: false, // TODO: Implement geocerca validation
+          fuera_zona: false,
           foto_blob: photoBlob,
           foto_url: null,
           es_inconsistente: isInconsistent,
@@ -169,27 +178,11 @@ export function useAttendance() {
         };
 
         if (isOnline) {
-          // Online: Upload photo and save directly
-          let fotoUrl: string | null = null;
+          // Subir foto principal
+          const mainPath = `${user.id}/${recordId}.jpg`;
+          const fotoUrl = await uploadPhoto(mainPath, photoBlob);
 
-          if (photoBlob) {
-            const fileName = `${user.id}/${recordId}.jpg`;
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('attendance-photos')
-              .upload(fileName, photoBlob, {
-                contentType: 'image/jpeg',
-              });
-
-            if (uploadError) {
-              console.error('Error uploading photo:', uploadError);
-            } else {
-              const { data: urlData } = supabase.storage
-                .from('attendance-photos')
-                .getPublicUrl(uploadData.path);
-              fotoUrl = urlData.publicUrl;
-            }
-          }
-
+          // Insert registro
           const { error: insertError } = await supabase.from('registros_asistencia').insert({
             id: record.id,
             user_id: record.user_id,
@@ -206,27 +199,21 @@ export function useAttendance() {
             nota_inconsistencia: record.nota_inconsistencia,
           });
 
-          if (insertError) {
-            throw new Error('Error guardando registro');
-          }
+          if (insertError) throw new Error('Error guardando registro');
         } else {
-          // Offline: Save to IndexedDB
+          // OFFLINE
           await savePendingRecord(record);
         }
 
-        // Refresh today's records
         await getTodayRecords();
 
-        // Calculate hours if this was a salida
         let hoursWorked: number | null = null;
-        if (tipo === 'salida') {
-          hoursWorked = calculateHoursWorked();
-        }
+        if (tipo === 'salida') hoursWorked = calculateHoursWorked();
 
         setState((prev) => ({ ...prev, isSubmitting: false, error: null }));
         return { success: true, hoursWorked };
-      } catch (error) {
-        console.error('Error marking attendance:', error);
+      } catch (err) {
+        console.error('Error marking attendance:', err);
         setState((prev) => ({
           ...prev,
           isSubmitting: false,
@@ -235,12 +222,64 @@ export function useAttendance() {
         return { success: false };
       }
     },
-    [user, isOnline, getCurrentPosition, capturePhoto, checkForInconsistency, getTodayRecords, calculateHoursWorked]
+    [user, isOnline, getCurrentPosition, checkForInconsistency, getTodayRecords, calculateHoursWorked, uploadPhoto]
+  );
+
+  /**
+   * ✅ Seguimiento fotográfico:
+   * - evidencia_n = 1 (obligatorio, controlado por UI con 3h)
+   * - evidencia_n = 2 (opcional, habilitado luego de completar el 1)
+   *
+   * Requiere tabla: public.seguimiento_fotos (SQL que ya te pasé)
+   */
+  const markFollowUp = useCallback(
+    async (evidenciaN: 1 | 2, photoBlob: Blob, entradaId: string): Promise<{ success: boolean }> => {
+      if (!user) {
+        setState((prev) => ({ ...prev, error: 'Usuario no autenticado' }));
+        return { success: false };
+      }
+
+      setState((prev) => ({ ...prev, isSubmitting: true, error: null }));
+
+      try {
+        const followupId = crypto.randomUUID();
+
+        // Subir foto de seguimiento
+        const path = `${user.id}/${entradaId}_seg_${evidenciaN}.jpg`;
+        const fotoUrl = await uploadPhoto(path, photoBlob);
+
+        if (!fotoUrl) throw new Error('No se pudo subir la foto de seguimiento');
+
+        // Insertar seguimiento
+        const { error: insertError } = await supabase.from('seguimiento_fotos').insert({
+          id: followupId,
+          entrada_id: entradaId,
+          user_id: user.id,
+          evidencia_n: evidenciaN,
+          foto_url: fotoUrl,
+        });
+
+        if (insertError) throw insertError;
+
+        setState((prev) => ({ ...prev, isSubmitting: false, error: null }));
+        return { success: true };
+      } catch (err) {
+        console.error('Error saving followup:', err);
+        setState((prev) => ({
+          ...prev,
+          isSubmitting: false,
+          error: 'Error al registrar seguimiento. Intenta de nuevo.',
+        }));
+        return { success: false };
+      }
+    },
+    [user, uploadPhoto]
   );
 
   return {
     ...state,
     markAttendance,
+    markFollowUp, // 👈 exporta esta función
     getTodayRecords,
     calculateHoursWorked,
   };
