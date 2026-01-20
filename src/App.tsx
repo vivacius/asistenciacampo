@@ -8,6 +8,7 @@ import { ProtectedRoute, SupervisorRoute, PublicRoute } from "@/components/Route
 import Auth from "./pages/Auth";
 import OperarioHome from "./pages/OperarioHome";
 import SupervisorDashboard from "./pages/SupervisorDashboard";
+import GeoVisor from "./pages/GeoVisor";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,14 @@ function AppContent() {
           <ProtectedRoute>
             <SupervisorRoute>
               <SupervisorDashboard />
+            </SupervisorRoute>
+          </ProtectedRoute>
+        } />
+        
+        <Route path="/supervisor/mapa" element={
+          <ProtectedRoute>
+            <SupervisorRoute>
+              <GeoVisor />
             </SupervisorRoute>
           </ProtectedRoute>
         } />
