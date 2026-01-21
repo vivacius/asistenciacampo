@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, Map } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Map, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { useRealtimeLocations } from '@/hooks/useRealtimeLocations';
 import { GeoVisorMap } from '@/components/geovisor/GeoVisorMap';
 import { OperariosList } from '@/components/geovisor/OperariosList';
+import { GeocercaImporter } from '@/components/geovisor/GeocercaImporter';
 import { Geocerca } from '@/lib/geocerca-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,25 +18,27 @@ export default function GeoVisor() {
   const [geocercas, setGeocercas] = useState<Geocerca[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showImporter, setShowImporter] = useState(false);
 
   // Fetch geocercas
-  useEffect(() => {
-    async function fetchGeocercas() {
-      const { data } = await supabase
-        .from('geocercas')
-        .select('*')
-        .eq('activa', true);
-      
-      if (data) {
-        setGeocercas(data.map(g => ({
-          ...g,
-          tipo: g.tipo as 'poligono' | 'radio',
-          coordenadas: g.coordenadas as unknown as Geocerca['coordenadas']
-        })));
-      }
+  const fetchGeocercas = useCallback(async () => {
+    const { data } = await supabase
+      .from('geocercas')
+      .select('*')
+      .eq('activa', true);
+    
+    if (data) {
+      setGeocercas(data.map(g => ({
+        ...g,
+        tipo: g.tipo as 'poligono' | 'radio',
+        coordenadas: g.coordenadas as unknown as Geocerca['coordenadas']
+      })));
     }
-    fetchGeocercas();
   }, []);
+
+  useEffect(() => {
+    fetchGeocercas();
+  }, [fetchGeocercas]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -67,6 +70,14 @@ export default function GeoVisor() {
         </div>
         
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowImporter(true)}
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Importar
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -116,6 +127,12 @@ export default function GeoVisor() {
           )}
         </div>
       </div>
+
+      <GeocercaImporter
+        open={showImporter}
+        onOpenChange={setShowImporter}
+        onImportComplete={fetchGeocercas}
+      />
     </div>
   );
 }
