@@ -7,6 +7,7 @@ import { useRealtimeLocations } from '@/hooks/useRealtimeLocations';
 import { GeoVisorMap } from '@/components/geovisor/GeoVisorMap';
 import { OperariosList } from '@/components/geovisor/OperariosList';
 import { GeocercaImporter } from '@/components/geovisor/GeocercaImporter';
+import { MetricsPanel } from '@/components/geovisor/MetricsPanel';
 import { Geocerca } from '@/lib/geocerca-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -94,15 +95,19 @@ export default function GeoVisor() {
       </header>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col lg:flex-row p-4 gap-4">
-        {/* Sidebar - Operarios list */}
-        <div className="lg:w-80 h-64 lg:h-auto flex-shrink-0">
-          <OperariosList
-            locations={locations}
-            selectedUserId={selectedUserId}
-            onSelect={setSelectedUserId}
-          />
-        </div>
+      <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
+        {/* Metrics Panel */}
+        <MetricsPanel locations={locations} />
+        
+        <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0">
+          {/* Sidebar - Operarios list */}
+          <div className="lg:w-80 h-64 lg:h-auto flex-shrink-0">
+            <OperariosList
+              locations={locations}
+              selectedUserId={selectedUserId}
+              onSelect={setSelectedUserId}
+            />
+          </div>
 
         {/* Map */}
         <div className="flex-1 min-h-[400px] lg:min-h-0">
@@ -125,6 +130,7 @@ export default function GeoVisor() {
               onUserSelect={setSelectedUserId}
             />
           )}
+        </div>
         </div>
       </div>
 
