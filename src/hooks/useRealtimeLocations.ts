@@ -22,7 +22,7 @@ export function useRealtimeLocations() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch latest location for each operario
+  // Fetch latest location for each operario from registros_asistencia
   const fetchLatestLocations = useCallback(async () => {
     if (!user || role !== 'supervisor') return;
 
@@ -30,10 +30,9 @@ export function useRealtimeLocations() {
       setIsLoading(true);
       setError(null);
 
-      // Get all unique user_ids from ubicaciones_operarios
-      // and their latest location
-      const { data: latestLocations, error: locError } = await supabase
-        .from('ubicaciones_operarios')
+      // Get all records from registros_asistencia with location data
+      const { data: latestRecords, error: locError } = await supabase
+        .from('registros_asistencia')
         .select(`
           id,
           user_id,
@@ -42,8 +41,10 @@ export function useRealtimeLocations() {
           precision_gps,
           timestamp,
           fuera_zona,
-          origen
+          tipo_registro
         `)
+        .not('latitud', 'is', null)
+        .not('longitud', 'is', null)
         .order('timestamp', { ascending: false });
 
       if (locError) throw locError;
@@ -61,11 +62,18 @@ export function useRealtimeLocations() {
       // Group by user_id and take the latest
       const locationMap = new Map<string, OperarioLocation>();
       
-      for (const loc of latestLocations || []) {
-        if (!locationMap.has(loc.user_id)) {
-          locationMap.set(loc.user_id, {
-            ...loc,
-            profile: profileMap.get(loc.user_id),
+      for (const record of latestRecords || []) {
+        if (!locationMap.has(record.user_id) && record.latitud && record.longitud) {
+          locationMap.set(record.user_id, {
+            id: record.id,
+            user_id: record.user_id,
+            latitud: record.latitud,
+            longitud: record.longitud,
+            precision_gps: record.precision_gps,
+            timestamp: record.timestamp,
+            fuera_zona: record.fuera_zona,
+            origen: record.tipo_registro, // Map tipo_registro to origen
+            profile: profileMap.get(record.user_id),
           });
         }
       }
@@ -85,30 +93,49 @@ export function useRealtimeLocations() {
 
     fetchLatestLocations();
 
-    // Subscribe to new inserts on ubicaciones_operarios
+    // Subscribe to new inserts on registros_asistencia
     const channel = supabase
-      .channel('ubicaciones-realtime')
+      .channel('asistencia-realtime')
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'ubicaciones_operarios',
+          table: 'registros_asistencia',
         },
         async (payload) => {
-          const newLocation = payload.new as OperarioLocation;
+          const newRecord = payload.new as {
+            id: string;
+            user_id: string;
+            latitud: number | null;
+            longitud: number | null;
+            precision_gps: number | null;
+            timestamp: string;
+            fuera_zona: boolean;
+            tipo_registro: string;
+          };
+          
+          // Only update if has location data
+          if (!newRecord.latitud || !newRecord.longitud) return;
           
           // Fetch profile for this user
           const { data: profile } = await supabase
             .from('profiles')
             .select('nombre')
-            .eq('id', newLocation.user_id)
+            .eq('id', newRecord.user_id)
             .single();
 
           setLocations(prev => {
             const updated = new Map(prev);
-            updated.set(newLocation.user_id, {
-              ...newLocation,
+            updated.set(newRecord.user_id, {
+              id: newRecord.id,
+              user_id: newRecord.user_id,
+              latitud: newRecord.latitud!,
+              longitud: newRecord.longitud!,
+              precision_gps: newRecord.precision_gps,
+              timestamp: newRecord.timestamp,
+              fuera_zona: newRecord.fuera_zona,
+              origen: newRecord.tipo_registro,
               profile: profile || undefined,
             });
             return updated;

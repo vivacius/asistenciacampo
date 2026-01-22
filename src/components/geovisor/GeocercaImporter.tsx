@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Upload, FileSpreadsheet, Check, X, Loader2, AlertCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Check, Loader2, AlertCircle, Server } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -37,6 +37,39 @@ export function GeocercaImporter({ open, onOpenChange, onImportComplete }: Geoce
     setGeocercas([]);
     setError(null);
     setImportProgress(0);
+  };
+
+  const handleLoadFromServer = async () => {
+    setStep('processing');
+    setError(null);
+
+    try {
+      // Fetch the Excel file from the server
+      const response = await fetch('/data/ste.xlsx');
+      if (!response.ok) {
+        throw new Error('No se pudo cargar el archivo del servidor');
+      }
+      
+      const blob = await response.blob();
+      const file = new File([blob], 'ste.xlsx', { type: blob.type });
+
+      const parsed = await parseExcelGeocercas(file, (processed, total) => {
+        setProgress(Math.round((processed / total) * 100));
+      });
+
+      if (parsed.length === 0) {
+        setError('No se encontraron geocercas válidas en el archivo');
+        setStep('error');
+        return;
+      }
+
+      setGeocercas(parsed);
+      setStep('preview');
+    } catch (err) {
+      console.error('Error loading file from server:', err);
+      setError('Error al cargar el archivo del servidor.');
+      setStep('error');
+    }
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,9 +185,16 @@ export function GeocercaImporter({ open, onOpenChange, onImportComplete }: Geoce
                 onChange={handleFileSelect}
                 className="hidden"
               />
-              <Button onClick={() => fileInputRef.current?.click()}>
-                Seleccionar Archivo
-              </Button>
+              <div className="flex flex-col gap-2 w-full max-w-xs">
+                <Button onClick={handleLoadFromServer} className="w-full">
+                  <Server className="h-4 w-4 mr-2" />
+                  Cargar desde servidor (ste.xlsx)
+                </Button>
+                <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Subir otro archivo
+                </Button>
+              </div>
             </div>
           )}
 
