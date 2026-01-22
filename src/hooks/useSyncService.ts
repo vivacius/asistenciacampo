@@ -47,11 +47,17 @@ export function useSyncService() {
       return null;
     }
 
-    const { data: urlData } = supabase.storage
+    // Use signed URL for private bucket (1 hour expiry)
+    const { data: signedData, error: signError } = await supabase.storage
       .from('attendance-photos')
-      .getPublicUrl(data.path);
+      .createSignedUrl(data.path, 3600);
 
-    return urlData.publicUrl;
+    if (signError) {
+      console.error('Error creating signed URL:', signError);
+      return null;
+    }
+
+    return signedData.signedUrl;
   };
 
   const syncRecord = async (record: PendingRecord): Promise<boolean> => {
