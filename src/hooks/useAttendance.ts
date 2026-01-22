@@ -183,10 +183,16 @@ export function useAttendance() {
             if (uploadError) {
               console.error('Error uploading photo:', uploadError);
             } else {
-              const { data: urlData } = supabase.storage
+              // Use signed URL for private bucket (1 hour expiry)
+              const { data: signedData, error: signError } = await supabase.storage
                 .from('attendance-photos')
-                .getPublicUrl(uploadData.path);
-              fotoUrl = urlData.publicUrl;
+                .createSignedUrl(uploadData.path, 3600);
+              
+              if (signError) {
+                console.error('Error creating signed URL:', signError);
+              } else {
+                fotoUrl = signedData.signedUrl;
+              }
             }
           }
 
