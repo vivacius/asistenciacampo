@@ -12,27 +12,18 @@ interface OperarioMarkerProps {
   onClick: () => void;
 }
 
-// Create custom colored markers
-function createColoredIcon(color: 'green' | 'red' | 'yellow'): L.DivIcon {
-  const colorMap = {
-    green: '#22c55e',
-    red: '#ef4444',
-    yellow: '#eab308',
-  };
+// Create custom worker icons based on status
+function createWorkerIcon(status: 'green' | 'red' | 'yellow'): L.Icon {
+  // green = dentro de zona, red = fuera de zona, yellow = ubicación antigua
+  const iconUrl = status === 'green' 
+    ? '/images/worker_ok.png' 
+    : '/images/worker_alert.png';
 
-  const svgIcon = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
-      <path fill="${colorMap[color]}" stroke="#fff" stroke-width="1" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-      <circle cx="12" cy="9" r="3" fill="#fff"/>
-    </svg>
-  `;
-
-  return L.divIcon({
-    html: svgIcon,
-    className: 'custom-marker',
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
-    popupAnchor: [0, -32],
+  return L.icon({
+    iconUrl,
+    iconSize: [40, 40],
+    iconAnchor: [20, 40],
+    popupAnchor: [0, -40],
   });
 }
 
@@ -40,7 +31,7 @@ export function OperarioMarker({ location, isSelected, onClick }: OperarioMarker
   const map = useMap();
   const markerRef = useRef<L.Marker | null>(null);
   const color = getMarkerColor(location.fuera_zona, location.timestamp);
-  const icon = createColoredIcon(color);
+  const icon = createWorkerIcon(color);
 
   const statusText = {
     green: 'Dentro de zona',
