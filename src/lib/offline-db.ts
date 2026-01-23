@@ -67,10 +67,7 @@ interface AsistenciaDB extends DBSchema {
 let dbInstance: IDBPDatabase<AsistenciaDB> | null = null;
 let isRepairing = false;
 
-/**
- * ✅ Verifica si existen stores/índices requeridos.
- * Si falta algo => schema mismatch.
- */
+
 function hasRequiredSchema(db: IDBPDatabase<AsistenciaDB>): boolean {
   const pendingOk =
     db.objectStoreNames.contains(STORE_PENDING);
@@ -78,12 +75,8 @@ function hasRequiredSchema(db: IDBPDatabase<AsistenciaDB>): boolean {
   const trackingOk =
     db.objectStoreNames.contains(STORE_TRACKING);
 
-  // Si falta algún store, ya está mal
   if (!pendingOk || !trackingOk) return false;
 
-  // Validación de índices: toca abrir transaction readonly para leer indexNames
-  // (IDBDatabase no expone indexNames directamente)
-  // Si esto falla, lo tomamos como mismatch.
   try {
     const tx = db.transaction([STORE_PENDING, STORE_TRACKING], 'readonly');
 
@@ -105,9 +98,7 @@ function hasRequiredSchema(db: IDBPDatabase<AsistenciaDB>): boolean {
   }
 }
 
-/**
- * ✅ Abre la DB, y si detecta mismatch, la borra y la recrea (autocuración).
- */
+
 export async function getDB(): Promise<IDBPDatabase<AsistenciaDB>> {
   if (dbInstance) return dbInstance;
 
