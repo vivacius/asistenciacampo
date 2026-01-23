@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute, SupervisorRoute, PublicRoute } from "@/components/RouteGuards";
+
 import Auth from "./pages/Auth";
 import OperarioHome from "./pages/OperarioHome";
 import SupervisorDashboard from "./pages/SupervisorDashboard";
