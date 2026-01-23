@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Download, Users, LogIn, LogOut, AlertTriangle, Loader2, MapPin, UserX } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { ArrowLeft, Download, Users, LogIn, LogOut, AlertTriangle, Loader2, Map as MapIcon } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 interface AttendanceRecord {
   id: string;
@@ -32,7 +32,7 @@ interface AttendanceRecord {
 
 export default function SupervisorDashboard() {
   const { signOut } = useAuth();
-
+  const navigate = useNavigate();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [users, setUsers] = useState<{ id: string; nombre: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -199,9 +199,13 @@ export default function SupervisorDashboard() {
             </Link>
             <h1 className="text-xl font-bold">Panel Supervisor</h1>
           </div>
-          <Button variant="ghost" size="sm" onClick={signOut}>
-            Salir
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate('/supervisor/mapa')}>
+              <MapIcon className="h-4 w-4 mr-2" />
+              Geo-Visor
+            </Button>
+            <Button variant="ghost" size="sm" onClick={signOut}>Salir</Button>
+          </div>
         </div>
       </header>
 

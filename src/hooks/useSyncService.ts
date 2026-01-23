@@ -48,49 +48,17 @@ export function useSyncService() {
       return null;
     }
 
-    const { data: urlData } = supabase.storage.from('attendance-photos').getPublicUrl(data.path);
-    return urlData.publicUrl ?? null;
-  };
+    // Use signed URL for private bucket (1 hour expiry)
+    const { data: signedData, error: signError } = await supabase.storage
+      .from('attendance-photos')
+      .createSignedUrl(data.path, 3600);
 
-  /**
-   * ✅ Si el registro NO trae hac_ste/suerte_nom (porque se marcó offline),
-   * y sí trae lat/lon, aquí (ya online) resolvemos con RPC antes de insertar.
-   */
-  const resolveGeoIfMissing = async (record: PendingRecord): Promise<{
-    hac_ste: string | null;
-    suerte_nom: string | null;
-  }> => {
-    const hac_ste = (record as any).hac_ste ?? null;
-    const suerte_nom = (record as any).suerte_nom ?? null;
-
-    // ya viene completo
-    if (hac_ste || suerte_nom) {
-      return { hac_ste, suerte_nom };
+    if (signError) {
+      console.error('Error creating signed URL:', signError);
+      return null;
     }
 
-    // no hay coords
-    if (record.latitud == null || record.longitud == null) {
-      return { hac_ste: null, suerte_nom: null };
-    }
-
-    try {
-      const { data, error } = await supabase.rpc('get_hacienda_by_point', {
-        lat: record.latitud,
-        lon: record.longitud,
-      });
-
-      if (error || !data || data.length === 0) {
-        return { hac_ste: null, suerte_nom: null };
-      }
-
-      return {
-        hac_ste: data[0].hac_ste ?? null,
-        suerte_nom: data[0].nom ?? null,
-      };
-    } catch (e) {
-      console.error('resolveGeoIfMissing error:', e);
-      return { hac_ste: null, suerte_nom: null };
-    }
+    return signedData.signedUrl;
   };
 
   const syncRecord = async (record: PendingRecord): Promise<boolean> => {

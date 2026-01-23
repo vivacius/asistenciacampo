@@ -374,8 +374,32 @@ export function useAttendance() {
         };
 
         if (isOnline) {
-          const mainPath = `${user.id}/${recordId}.jpg`;
-          const fotoUrl = await uploadPhoto(mainPath, photoBlob);
+          // Online: Upload photo and save directly
+          let fotoUrl: string | null = null;
+
+          if (photoBlob) {
+            const fileName = `${user.id}/${recordId}.jpg`;
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('attendance-photos')
+              .upload(fileName, photoBlob, {
+                contentType: 'image/jpeg',
+              });
+
+            if (uploadError) {
+              console.error('Error uploading photo:', uploadError);
+            } else {
+              // Use signed URL for private bucket (1 hour expiry)
+              const { data: signedData, error: signError } = await supabase.storage
+                .from('attendance-photos')
+                .createSignedUrl(uploadData.path, 3600);
+              
+              if (signError) {
+                console.error('Error creating signed URL:', signError);
+              } else {
+                fotoUrl = signedData.signedUrl;
+              }
+            }
+          }
 
           const payload: any = {
             id: record.id,

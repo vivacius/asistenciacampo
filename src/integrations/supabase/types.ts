@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      geocercas: {
+        Row: {
+          activa: boolean
+          color: string | null
+          coordenadas: Json
+          created_at: string
+          id: string
+          nombre: string
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          activa?: boolean
+          color?: string | null
+          coordenadas: Json
+          created_at?: string
+          id?: string
+          nombre: string
+          tipo: string
+          updated_at?: string
+        }
+        Update: {
+          activa?: boolean
+          color?: string | null
+          coordenadas?: Json
+          created_at?: string
+          id?: string
+          nombre?: string
+          tipo?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           activo: boolean
@@ -88,6 +121,56 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      ubicaciones_operarios: {
+        Row: {
+          created_at: string
+          estado_sync: string
+          fuera_zona: boolean
+          geocerca_id: string | null
+          id: string
+          latitud: number
+          longitud: number
+          origen: string
+          precision_gps: number | null
+          timestamp: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          estado_sync?: string
+          fuera_zona?: boolean
+          geocerca_id?: string | null
+          id?: string
+          latitud: number
+          longitud: number
+          origen: string
+          precision_gps?: number | null
+          timestamp?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          estado_sync?: string
+          fuera_zona?: boolean
+          geocerca_id?: string | null
+          id?: string
+          latitud?: number
+          longitud?: number
+          origen?: string
+          precision_gps?: number | null
+          timestamp?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_geocerca"
+            columns: ["geocerca_id"]
+            isOneToOne: false
+            referencedRelation: "geocercas"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {

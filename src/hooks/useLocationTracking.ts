@@ -1,146 +1,242 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from './useAuth';
+import { useOnlineStatus } from './useOnlineStatus';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
-import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { useGeolocation } from '@/hooks/useGeolocation';
-import { savePendingTrackPoint, PendingTrackPoint } from '@/lib/offline-db';
+import { evaluarUbicacion, Geocerca } from '@/lib/geocerca-utils';
+import { 
+  savePendingLocation, 
+  getPendingLocationsByUser, 
+  deletePendingLocation,
+  getPendingLocationCount 
+} from '@/lib/offline-db';
 
-type GeoResult = { nom: string; hac_ste: string } | null;
-
-function safeUUID() {
-  try {
-    // @ts-ignore
-    if (typeof crypto !== 'undefined' && crypto?.randomUUID) return crypto.randomUUID();
-  } catch {}
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+interface LocationState {
+  lastUpdate: Date | null;
+  pendingCount: number;
+  isTracking: boolean;
+  error: string | null;
 }
 
-function toIsoDate(d = new Date()) {
-  return d.toISOString().split('T')[0];
-}
+const TRACKING_INTERVAL_MS = 60 * 60 * 1000; // 60 minutes
 
-export function useLocationTracking(activeEntradaId: string | null) {
+export function useLocationTracking() {
   const { user } = useAuth();
-  const { isOnline } = useOnlineStatus();
-  const { getCurrentPosition } = useGeolocation();
+  const isOnline = useOnlineStatus();
+  const [state, setState] = useState<LocationState>({
+    lastUpdate: null,
+    pendingCount: 0,
+    isTracking: false,
+    error: null,
+  });
+  const [geocercas, setGeocercas] = useState<Geocerca[]>([]);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastCaptureRef = useRef<Date | null>(null);
 
-  const timerRef = useRef<number | null>(null);
+  // Fetch active geocercas
+  const fetchGeocercas = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('geocercas')
+        .select('*')
+        .eq('activa', true);
+      
+      if (error) throw error;
+      
+      setGeocercas(data?.map(g => ({
+        ...g,
+        tipo: g.tipo as 'poligono' | 'radio',
+        coordenadas: g.coordenadas as unknown as Geocerca['coordenadas']
+      })) || []);
+    } catch (err) {
+      console.error('Error fetching geocercas:', err);
+    }
+  }, [user]);
 
-  const resolveGeo = useCallback(async (lat: number, lon: number): Promise<GeoResult> => {
-    const { data, error } = await supabase.rpc('get_hacienda_by_point', { lat, lon });
-    if (error || !data || data.length === 0) return null;
-    return { nom: data[0].nom, hac_ste: data[0].hac_ste };
-  }, []);
+  // Update pending count
+  const updatePendingCount = useCallback(async () => {
+    if (!user) return;
+    const count = await getPendingLocationCount();
+    setState(prev => ({ ...prev, pendingCount: count }));
+  }, [user]);
 
-  const pushPoint = useCallback(
-    async (source: 'hourly' | 'entrada' | 'salida' | 'manual' = 'hourly') => {
-      if (!user) return;
-      if (!activeEntradaId) return;
+  // Capture current location
+  const captureLocation = useCallback(async (
+    origen: 'entrada' | 'salida' | 'tracking'
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) {
+      return { success: false, error: 'Usuario no autenticado' };
+    }
 
-      // GPS best-effort
-      let location: { latitude: number; longitude: number; accuracy: number } | null = null;
-      try {
-        location = await getCurrentPosition();
-      } catch {
-        // sin gps, igual puedes guardar un punto "vacío" si quieres
+    // Prevent capturing more than once per hour for tracking
+    if (origen === 'tracking' && lastCaptureRef.current) {
+      const timeSinceLastCapture = Date.now() - lastCaptureRef.current.getTime();
+      if (timeSinceLastCapture < TRACKING_INTERVAL_MS) {
+        return { success: false, error: 'Captura muy reciente' };
       }
+    }
 
-      const now = new Date();
-      const id = safeUUID();
+    setState(prev => ({ ...prev, isTracking: true, error: null }));
 
-      let geo: GeoResult = null;
-      if (isOnline && location?.latitude != null && location?.longitude != null) {
-        geo = await resolveGeo(location.latitude, location.longitude);
-      }
+    try {
+      // Get current position
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error('Geolocalización no soportada'));
+          return;
+        }
+        
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        });
+      });
 
-      const hasCoords = location?.latitude != null && location?.longitude != null;
-      const fueraZona = hasCoords ? !geo : false;
-
-      const payload = {
-        id,
+      const { latitude, longitude, accuracy } = position.coords;
+      
+      // Evaluate if inside geocerca
+      const { dentro, geocerca } = evaluarUbicacion(latitude, longitude, geocercas);
+      
+      const locationRecord = {
+        id: crypto.randomUUID(),
         user_id: user.id,
-        fecha: toIsoDate(now),
-        entrada_id: activeEntradaId,
-        recorded_at: now.toISOString(),
-        latitud: location?.latitude ?? null,
-        longitud: location?.longitude ?? null,
-        precision_gps: location?.accuracy ?? null,
-        fuera_zona: fueraZona,
-        hac_ste: geo?.hac_ste ?? null,
-        suerte_nom: geo?.nom ?? null,
-        source,
+        latitud: latitude,
+        longitud: longitude,
+        precision_gps: accuracy,
+        timestamp: new Date().toISOString(),
+        fuera_zona: !dentro,
+        geocerca_id: geocerca?.id || null,
+        origen,
+        estado_sync: isOnline ? 'sincronizado' : 'pendiente_sync',
+        created_at: new Date().toISOString(),
       };
 
       if (isOnline) {
-        const { error } = await supabase.from('tracking_ubicaciones').insert(payload);
-        if (error) {
-          // si falla online, lo mandamos a offline para no perderlo
-          const p: PendingTrackPoint = { ...payload, created_at: now.toISOString() };
-          await savePendingTrackPoint(p);
-        }
+        // Save directly to Supabase
+        const { error } = await supabase
+          .from('ubicaciones_operarios')
+          .insert({
+            user_id: locationRecord.user_id,
+            latitud: locationRecord.latitud,
+            longitud: locationRecord.longitud,
+            precision_gps: locationRecord.precision_gps,
+            timestamp: locationRecord.timestamp,
+            fuera_zona: locationRecord.fuera_zona,
+            geocerca_id: locationRecord.geocerca_id,
+            origen: locationRecord.origen,
+            estado_sync: 'sincronizado',
+          });
+        
+        if (error) throw error;
       } else {
-        const p: PendingTrackPoint = { ...payload, created_at: now.toISOString() };
-        await savePendingTrackPoint(p);
+        // Save to IndexedDB for later sync
+        await savePendingLocation({
+          id: locationRecord.id,
+          user_id: locationRecord.user_id,
+          latitud: locationRecord.latitud,
+          longitud: locationRecord.longitud,
+          precision_gps: locationRecord.precision_gps,
+          timestamp: locationRecord.timestamp,
+          fuera_zona: locationRecord.fuera_zona,
+          geocerca_id: locationRecord.geocerca_id,
+          origen: locationRecord.origen,
+        });
       }
-    },
-    [user, activeEntradaId, isOnline, getCurrentPosition, resolveGeo]
-  );
 
-  const stop = useCallback(() => {
-    if (timerRef.current) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
+      lastCaptureRef.current = new Date();
+      setState(prev => ({
+        ...prev,
+        lastUpdate: new Date(),
+        isTracking: false,
+      }));
+      
+      await updatePendingCount();
+      
+      return { success: true };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Error capturando ubicación';
+      setState(prev => ({ ...prev, isTracking: false, error: errorMessage }));
+      return { success: false, error: errorMessage };
+    }
+  }, [user, isOnline, geocercas, updatePendingCount]);
+
+  // Sync pending locations when online
+  const syncPendingLocations = useCallback(async () => {
+    if (!user || !isOnline) return;
+
+    try {
+      const pendingLocations = await getPendingLocationsByUser(user.id);
+      
+      for (const location of pendingLocations) {
+        const { error } = await supabase
+          .from('ubicaciones_operarios')
+          .insert({
+            user_id: location.user_id,
+            latitud: location.latitud,
+            longitud: location.longitud,
+            precision_gps: location.precision_gps,
+            timestamp: location.timestamp,
+            fuera_zona: location.fuera_zona,
+            geocerca_id: location.geocerca_id,
+            origen: location.origen,
+            estado_sync: 'sincronizado',
+          });
+        
+        if (!error) {
+          await deletePendingLocation(location.id);
+        }
+      }
+      
+      await updatePendingCount();
+    } catch (err) {
+      console.error('Error syncing locations:', err);
+    }
+  }, [user, isOnline, updatePendingCount]);
+
+  // Start periodic tracking (every 60 minutes)
+  const startTracking = useCallback(() => {
+    if (intervalRef.current) return;
+    
+    intervalRef.current = setInterval(() => {
+      captureLocation('tracking');
+    }, TRACKING_INTERVAL_MS);
+  }, [captureLocation]);
+
+  // Stop tracking
+  const stopTracking = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
   }, []);
 
-  const scheduleNext = useCallback(() => {
-    stop();
-    if (!activeEntradaId || !user) return;
-
-    // ✅ Opción A: “cada 60 min desde ahora”
-    // const delayMs = 60 * 60 * 1000;
-
-    // ✅ Opción B: “alineado a la hora exacta” (recomendado)
-    const now = new Date();
-    const next = new Date(now);
-    next.setMinutes(0, 0, 0);
-    next.setHours(now.getHours() + 1);
-    const delayMs = next.getTime() - now.getTime();
-
-    timerRef.current = window.setTimeout(async () => {
-      await pushPoint('hourly');
-      scheduleNext(); // reprograma
-    }, delayMs) as unknown as number;
-  }, [activeEntradaId, user, pushPoint, stop]);
-
+  // Initialize on mount
   useEffect(() => {
-    if (!activeEntradaId) {
-      stop();
-      return;
+    if (user) {
+      fetchGeocercas();
+      updatePendingCount();
+      startTracking();
     }
-
-    // al arrancar tracking, registra un punto inmediato (opcional)
-    pushPoint('manual');
-    scheduleNext();
-
-    // si el usuario vuelve a la pestaña, intenta capturar + reprogramar
-    const onVis = () => {
-      if (document.visibilityState === 'visible' && activeEntradaId) {
-        pushPoint('manual');
-        scheduleNext();
-      }
-    };
-    document.addEventListener('visibilitychange', onVis);
-
+    
     return () => {
-      document.removeEventListener('visibilitychange', onVis);
-      stop();
+      stopTracking();
     };
-  }, [activeEntradaId, pushPoint, scheduleNext, stop]);
+  }, [user, fetchGeocercas, updatePendingCount, startTracking, stopTracking]);
 
-  return { pushPointNow: () => pushPoint('manual'), stopTracking: stop };
+  // Sync when coming online
+  useEffect(() => {
+    if (isOnline && user) {
+      syncPendingLocations();
+    }
+  }, [isOnline, user, syncPendingLocations]);
+
+  return {
+    ...state,
+    captureLocation,
+    syncPendingLocations,
+    geocercas,
+    refetchGeocercas: fetchGeocercas,
+  };
 }

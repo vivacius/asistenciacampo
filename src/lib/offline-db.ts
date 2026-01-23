@@ -35,45 +35,22 @@ export interface PendingTrackPoint {
   created_at: string; // ISO
 }
 
-const DB_NAME = 'asistencia-agricola';
-const DB_VERSION = 2; // puedes dejarlo así como lo tienes
-const STORE_PENDING = 'pending-records';
-const STORE_TRACKING = 'pending-track-points';
-
-interface AsistenciaDB extends DBSchema {
-  [STORE_PENDING]: {
-    key: string;
-    value: PendingRecord;
-    indexes: {
-      user_id: string;
-      fecha: string;
-      timestamp: string;
-      user_fecha: [string, string];
-    };
-  };
-  [STORE_TRACKING]: {
-    key: string;
-    value: PendingTrackPoint;
-    indexes: {
-      user_id: string;
-      fecha: string;
-      recorded_at: string;
-      user_fecha: [string, string];
-      entrada_id: string;
-    };
-  };
+export interface PendingLocation {
+  id: string;
+  user_id: string;
+  latitud: number;
+  longitud: number;
+  precision_gps: number | null;
+  timestamp: string;
+  fuera_zona: boolean;
+  geocerca_id: string | null;
+  origen: 'entrada' | 'salida' | 'tracking';
 }
 
-let dbInstance: IDBPDatabase<AsistenciaDB> | null = null;
-let isRepairing = false;
-
-/**
- * ✅ Verifica si existen stores/índices requeridos.
- * Si falta algo => schema mismatch.
- */
-function hasRequiredSchema(db: IDBPDatabase<AsistenciaDB>): boolean {
-  const pendingOk =
-    db.objectStoreNames.contains(STORE_PENDING);
+const DB_NAME = 'asistencia-agricola';
+const DB_VERSION = 2;
+const STORE_PENDING = 'pending-records';
+const STORE_PENDING_LOCATIONS = 'pending-locations';
 
   const trackingOk =
     db.objectStoreNames.contains(STORE_TRACKING);
@@ -111,40 +88,24 @@ function hasRequiredSchema(db: IDBPDatabase<AsistenciaDB>): boolean {
 export async function getDB(): Promise<IDBPDatabase<AsistenciaDB>> {
   if (dbInstance) return dbInstance;
 
-  const open = async () =>
-    openDB<AsistenciaDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        // ===== STORE: pending-records =====
-        let pending: any;
-        if (!db.objectStoreNames.contains(STORE_PENDING)) {
-          pending = db.createObjectStore(STORE_PENDING, { keyPath: 'id' });
-        } else {
-          pending = (db as any).transaction.objectStore(STORE_PENDING);
-        }
-
-        if (!pending.indexNames.contains('user_id')) pending.createIndex('user_id', 'user_id');
-        if (!pending.indexNames.contains('fecha')) pending.createIndex('fecha', 'fecha');
-        if (!pending.indexNames.contains('timestamp')) pending.createIndex('timestamp', 'timestamp');
-        if (!pending.indexNames.contains('user_fecha')) pending.createIndex('user_fecha', ['user_id', 'fecha']);
-
-        // ===== STORE: pending-track-points =====
-        let track: any;
-        if (!db.objectStoreNames.contains(STORE_TRACKING)) {
-          track = db.createObjectStore(STORE_TRACKING, { keyPath: 'id' });
-        } else {
-          track = (db as any).transaction.objectStore(STORE_TRACKING);
-        }
-
-        if (!track.indexNames.contains('user_id')) track.createIndex('user_id', 'user_id');
-        if (!track.indexNames.contains('fecha')) track.createIndex('fecha', 'fecha');
-        if (!track.indexNames.contains('recorded_at')) track.createIndex('recorded_at', 'recorded_at');
-        if (!track.indexNames.contains('user_fecha')) track.createIndex('user_fecha', ['user_id', 'fecha']);
-        if (!track.indexNames.contains('entrada_id')) track.createIndex('entrada_id', 'entrada_id');
-      },
-    });
-
-  // 1) Abrimos
-  dbInstance = await open();
+  dbInstance = await openDB(DB_NAME, DB_VERSION, {
+    upgrade(db, oldVersion) {
+      // Existing pending records store
+      if (!db.objectStoreNames.contains(STORE_PENDING)) {
+        const store = db.createObjectStore(STORE_PENDING, { keyPath: 'id' });
+        store.createIndex('user_id', 'user_id');
+        store.createIndex('fecha', 'fecha');
+        store.createIndex('timestamp', 'timestamp');
+      }
+      
+      // New pending locations store (added in version 2)
+      if (!db.objectStoreNames.contains(STORE_PENDING_LOCATIONS)) {
+        const locStore = db.createObjectStore(STORE_PENDING_LOCATIONS, { keyPath: 'id' });
+        locStore.createIndex('user_id', 'user_id');
+        locStore.createIndex('timestamp', 'timestamp');
+      }
+    },
+  });
 
   // 2) Validamos schema
   if (!hasRequiredSchema(dbInstance) && !isRepairing) {
@@ -233,4 +194,30 @@ export async function clearAllOffline(): Promise<void> {
 export async function getPendingCount(): Promise<number> {
   const db = await getDB();
   return db.count(STORE_PENDING);
+}
+
+// Location-specific functions
+export async function savePendingLocation(location: PendingLocation): Promise<void> {
+  const db = await getDB();
+  await db.put(STORE_PENDING_LOCATIONS, location);
+}
+
+export async function getPendingLocations(): Promise<PendingLocation[]> {
+  const db = await getDB();
+  return db.getAll(STORE_PENDING_LOCATIONS);
+}
+
+export async function getPendingLocationsByUser(userId: string): Promise<PendingLocation[]> {
+  const db = await getDB();
+  return db.getAllFromIndex(STORE_PENDING_LOCATIONS, 'user_id', userId);
+}
+
+export async function deletePendingLocation(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete(STORE_PENDING_LOCATIONS, id);
+}
+
+export async function getPendingLocationCount(): Promise<number> {
+  const db = await getDB();
+  return db.count(STORE_PENDING_LOCATIONS);
 }
