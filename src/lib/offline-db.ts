@@ -58,9 +58,7 @@ const STORE_PENDING_LOCATIONS = 'pending-locations';
   // Si falta algún store, ya está mal
   if (!pendingOk || !trackingOk) return false;
 
-  // Validación de índices: toca abrir transaction readonly para leer indexNames
-  // (IDBDatabase no expone indexNames directamente)
-  // Si esto falla, lo tomamos como mismatch.
+
   try {
     const tx = db.transaction([STORE_PENDING, STORE_TRACKING], 'readonly');
 
@@ -80,11 +78,9 @@ const STORE_PENDING_LOCATIONS = 'pending-locations';
   } catch {
     return false;
   }
-}
 
-/**
- * ✅ Abre la DB, y si detecta mismatch, la borra y la recrea (autocuración).
- */
+
+
 export async function getDB(): Promise<IDBPDatabase<AsistenciaDB>> {
   if (dbInstance) return dbInstance;
 
